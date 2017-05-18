@@ -6,32 +6,54 @@ import * as models from '../../models';
 import BaseExtension from './base/base-extension';
 
 export default class ResponseExtension extends BaseExtension {
-  getTagName () {
+  getName () {
+    return 'Response Value';
+  }
+
+  getTag () {
     return 'response';
+  }
+
+  getDescription () {
+    return 'reference values from other requests';
+  }
+
+  getDefaultFill () {
+    return "response 'body', '', ''";
   }
 
   getArguments () {
     return [
       {
-        name: 'field',
+        key: 'field',
+        label: 'Target Attribute',
         type: 'enum',
-        options: ['body']
+        options: [
+          {name: 'Body', value: 'body'},
+          {name: 'Header', value: 'header'}
+        ]
       },
       {
-        name: 'request',
+        key: 'request',
+        label: 'Target Request',
         type: 'model',
         model: 'Request'
       },
       {
-        name: 'query',
+        key: 'filter',
+        label: 'Filter Text',
         type: 'string'
       }
     ];
   }
 
-  async run (context, field, id, query) {
-    if (field !== 'body') {
+  async run (context, field, id, filter) {
+    if (!['body', 'header'].includes(field)) {
       throw new Error(`Invalid response field ${field}`);
+    }
+
+    if (!filter) {
+      throw new Error(`No ${field} filter specified`);
     }
 
     const request = await models.request.getById(id);
@@ -45,15 +67,21 @@ export default class ResponseExtension extends BaseExtension {
       throw new Error(`No responses for request ${id}`);
     }
 
-    const bodyBuffer = new Buffer(response.body, response.encoding);
-    const bodyStr = bodyBuffer.toString();
+    const sanitizedFilter = filter.trim();
 
-    if (query.indexOf('$') === 0) {
-      return this.matchJSONPath(bodyStr, query);
-    } else if (query.indexOf('/') === 0) {
-      return this.matchXPath(bodyStr, query);
-    } else {
-      throw new Error(`Invalid format for response query: ${query}`);
+    if (field === 'header') {
+      return this.matchHeader(response.headers, sanitizedFilter);
+    } else { // match "body"
+      const bodyBuffer = new Buffer(response.body, response.encoding);
+      const bodyStr = bodyBuffer.toString();
+
+      if (sanitizedFilter.indexOf('$') === 0) {
+        return this.matchJSONPath(bodyStr, sanitizedFilter);
+      } else if (sanitizedFilter.indexOf('/') === 0) {
+        return this.matchXPath(bodyStr, sanitizedFilter);
+      } else {
+        throw new Error(`Invalid format for response query: ${sanitizedFilter}`);
+      }
     }
   }
 
@@ -101,5 +129,17 @@ export default class ResponseExtension extends BaseExtension {
     }
 
     return results[0].childNodes.toString();
+  }
+
+  matchHeader (headers, name) {
+    const header = headers.find(
+      h => h.name.toLowerCase() === name.toLowerCase()
+    );
+
+    if (!header) {
+      throw new Error(`No match for header: ${name}`);
+    }
+
+    return header.value;
   }
 }
